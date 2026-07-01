@@ -7,7 +7,7 @@
 #       (같은 폴더에 GT-*.csv 있으면 ROI 좌표 자동 사용)
 #    2) 썸네일 클릭 -> 학습과 동일하게 전처리(28x28 흑백) -> Q7 양자화
 #    3) UART로 784바이트 전송 -> FPGA 추론
-#    4) 42바이트 결과패킷 수신 [0xAA, class, logit0..9(int32 LE)]
+#    4) 결과패킷 수신 [0xAA, class, logit0..9(int32 LE), cycles(uint32 LE, optional)]
 #    5) 예측 클래스명 + confidence(softmax) 막대 표시
 #
 #  필요 패키지:  pip install pyqt5 pyserial opencv-python numpy
@@ -15,15 +15,22 @@
 import sys
 import glob
 import os
+import atexit
+import subprocess
 import time
+
+# TensorFlow native backends can crash on some CPU/GPU library combinations.
+# Set these before importing tensorflow.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 
 import numpy as np
 import cv2
 import serial
 import serial.tools.list_ports
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-import tensorflow as tf
+IMAGE_SIZE = 28
 
 MODEL_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -31,6 +38,116 @@ MODEL_PATH = os.path.join(
     "grayscale_c5_c6_d16_split100_train100",
     "best_model_grayscale_c5_c6_d16_split100_train100.keras"
 )
+
+
+def _predict_stdin_main():
+    """Run TensorFlow in a child process so native crashes cannot kill the GUI."""
+    import tensorflow as tf
+
+    tf.config.optimizer.set_jit(False)
+    raw = sys.stdin.buffer.read(IMAGE_SIZE * IMAGE_SIZE)
+    if len(raw) != IMAGE_SIZE * IMAGE_SIZE:
+        print(f"입력 크기 오류: {len(raw)} bytes", file=sys.stderr)
+        return 2
+
+    gray = np.frombuffer(raw, dtype=np.uint8).reshape(1, IMAGE_SIZE, IMAGE_SIZE, 1)
+    inp = gray.astype(np.float32) / 255.0
+    t0 = time.perf_counter()
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+    logits = model(inp, training=False).numpy()
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    pred = int(np.argmax(logits, axis=1)[0])
+    print(f"{pred} {elapsed_ms:.1f}")
+    return 0
+
+
+def _predict_worker_main():
+    """Persistent TensorFlow worker. Model load is outside measured inference time."""
+    import tensorflow as tf
+
+    tf.config.optimizer.set_jit(False)
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+    dummy = np.zeros((1, IMAGE_SIZE, IMAGE_SIZE, 1), dtype=np.float32)
+    model(dummy, training=False).numpy()
+    while True:
+        raw = sys.stdin.buffer.read(IMAGE_SIZE * IMAGE_SIZE)
+        if not raw:
+            return 0
+        if len(raw) != IMAGE_SIZE * IMAGE_SIZE:
+            print(f"ERR 입력 크기 오류: {len(raw)} bytes", flush=True)
+            return 2
+
+        gray = np.frombuffer(raw, dtype=np.uint8).reshape(1, IMAGE_SIZE, IMAGE_SIZE, 1)
+        inp = gray.astype(np.float32) / 255.0
+        t0 = time.perf_counter()
+        logits = model(inp, training=False).numpy()
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        pred = int(np.argmax(logits, axis=1)[0])
+        print(f"OK {pred} {elapsed_ms:.3f}", flush=True)
+
+
+if "--predict-stdin" in sys.argv:
+    sys.exit(_predict_stdin_main())
+if "--predict-worker" in sys.argv:
+    sys.exit(_predict_worker_main())
+
+
+_PY_WORKER = None
+
+
+def stop_python_worker():
+    global _PY_WORKER
+    if _PY_WORKER is not None:
+        try:
+            _PY_WORKER.terminate()
+        except Exception:
+            pass
+        _PY_WORKER = None
+
+
+atexit.register(stop_python_worker)
+
+
+def get_python_worker():
+    global _PY_WORKER
+    if _PY_WORKER is not None and _PY_WORKER.poll() is None:
+        return _PY_WORKER
+
+    env = os.environ.copy()
+    env.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    env.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+    env.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+    _PY_WORKER = subprocess.Popen(
+        [sys.executable, os.path.abspath(__file__), "--predict-worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        bufsize=0,
+        text=False,
+    )
+    return _PY_WORKER
+
+
+def run_python_prediction(gray):
+    proc = get_python_worker()
+    try:
+        proc.stdin.write(gray.astype(np.uint8).tobytes())
+        proc.stdin.flush()
+        line = proc.stdout.readline().decode("utf-8", errors="replace").strip()
+    except Exception:
+        stop_python_worker()
+        raise
+
+    parts = line.split()
+    if len(parts) < 3 or parts[0] != "OK":
+        if proc.poll() is not None:
+            err = proc.stderr.read().decode("utf-8", errors="replace").strip()
+            stop_python_worker()
+            raise RuntimeError(err or "Python 예측 worker 종료")
+        raise RuntimeError("Python 예측 결과 파싱 실패")
+    return int(parts[1]), float(parts[2])
+
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
@@ -43,7 +160,6 @@ from PyQt5.QtWidgets import (
 # ---------------------------------------------------------------------
 #  설정 (학습 코드와 반드시 동일하게 유지)
 # ---------------------------------------------------------------------
-IMAGE_SIZE = 28
 MIN_ROI_SIZE = 8
 ROI_MARGIN_RATIO = 0.0
 
@@ -61,7 +177,9 @@ GTSRB_ID_TO_NAME = {
 
 BAUD = 115200
 IMG_BYTES = 784                 # 28*28
-PACKET_BYTES = 42               # 0xAA + class + 10*int32
+PACKET_BASE_BYTES = 42          # 0xAA + class + 10*int32
+PACKET_BYTES = 46               # base + uint32 inference cycles
+FPGA_CLK_HZ = 100_000_000       # Basys3 system clock
 
 
 # ---------------------------------------------------------------------
@@ -118,7 +236,7 @@ def softmax(x):
 #  시리얼 워커 스레드 (UART 송수신은 블로킹이므로 별도 스레드)
 # ---------------------------------------------------------------------
 class SerialWorker(QThread):
-    finished_ok = pyqtSignal(int, object, float)  # (pred_class, logits, elapsed_ms)
+    finished_ok = pyqtSignal(int, object, float, object)  # pred, logits, rtt_ms, cycles
     failed = pyqtSignal(str)
 
     def __init__(self, port, payload):
@@ -135,20 +253,25 @@ class SerialWorker(QThread):
                 ser.write(self.payload)      # 784바이트 전송
                 ser.flush()
 
-                # 42바이트 결과패킷 수신
-                pkt = ser.read(PACKET_BYTES)
+                # 기본 42바이트를 먼저 받고, 새 RTL이면 cycle count 4바이트를 추가로 받는다.
+                pkt = ser.read(PACKET_BASE_BYTES)
+                ser.timeout = 0.1
+                cycle_pkt = ser.read(PACKET_BYTES - PACKET_BASE_BYTES)
                 elapsed_ms = (time.perf_counter() - t0) * 1000
 
-                if len(pkt) != PACKET_BYTES:
+                if len(pkt) != PACKET_BASE_BYTES:
                     self.failed.emit(
-                        f"패킷 수신 실패: {len(pkt)}/{PACKET_BYTES} 바이트")
+                        f"패킷 수신 실패: {len(pkt)}/{PACKET_BASE_BYTES} 바이트")
                     return
                 if pkt[0] != 0xAA:
                     self.failed.emit(f"헤더 오류: 0x{pkt[0]:02X} (기대 0xAA)")
                     return
                 pred = pkt[1]
                 logits = np.frombuffer(pkt[2:42], dtype="<i4").astype(np.int64)
-                self.finished_ok.emit(pred, logits, elapsed_ms)
+                cycles = None
+                if len(cycle_pkt) == 4:
+                    cycles = int(np.frombuffer(cycle_pkt, dtype="<u4")[0])
+                self.finished_ok.emit(pred, logits, elapsed_ms, cycles)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -192,12 +315,8 @@ class MainWindow(QWidget):
         self.setWindowTitle("FPGA NPU 교통표지판 분류 데모")
         self.resize(950, 750)
         self.worker = None
-        try:
-            self.keras_model = tf.keras.models.load_model(MODEL_PATH)
-            self.keras_model.predict(np.zeros((1, 28, 28, 1), dtype=np.float32), verbose=0)
-        except Exception as e:
-            self.keras_model = None
-            print(f"모델 로드 실패: {e}")
+        self.python_model_available = os.path.exists(MODEL_PATH)
+        self.pending_status_text = ""
         self._build_ui()
 
     def _build_ui(self):
@@ -286,6 +405,8 @@ class MainWindow(QWidget):
         self.status = QLabel("폴더를 열고 이미지를 클릭하세요.")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color:#555;")
+        if self.pending_status_text:
+            self.status.setText(self.pending_status_text)
         right.addWidget(self.status)
         right.addStretch(1)
 
@@ -299,9 +420,24 @@ class MainWindow(QWidget):
         self.port_box.clear()
         ports = serial.tools.list_ports.comports()
         for p in ports:
-            self.port_box.addItem(p.device)
+            desc = p.description or "serial"
+            hwid = p.hwid or ""
+            label = f"{p.device} - {desc}"
+            if hwid and hwid != "n/a":
+                label += f" [{hwid}]"
+            self.port_box.addItem(label, p.device)
         if not ports:
-            self.port_box.addItem("(포트 없음)")
+            self.port_box.addItem("(포트 없음)", "")
+            self.set_status(
+                "USB-UART 포트가 감지되지 않았습니다. 보드 연결, 드라이버, 권한을 확인하세요.")
+        else:
+            self.set_status(f"{len(ports)}개 포트 감지됨. FPGA USB-UART 포트를 선택하세요.")
+
+    def set_status(self, text):
+        if hasattr(self, "status"):
+            self.status.setText(text)
+        else:
+            self.pending_status_text = text
 
     # ---- 폴더 열기 + 썸네일 채우기 ----
     def open_folder(self):
@@ -380,21 +516,23 @@ class MainWindow(QWidget):
         self.truth_lbl.setText(f"➜ {truth}")
 
         # Python 추론
-        if self.keras_model is not None:
-            inp = gray.astype(np.float32) / 255.0
-            inp = inp.reshape(1, 28, 28, 1)
-            t0 = time.perf_counter()
-            py_pred = np.argmax(self.keras_model.predict(inp, verbose=0))
-            py_ms = (time.perf_counter() - t0) * 1000
-            py_name = CLASS_NAMES[py_pred] if 0 <= py_pred < 10 else f"?{py_pred}"
-            self.py_result_lbl.setText(f"➜ {py_name}(#{py_pred})")
-            self.py_time_lbl.setText(f"추론 시간: {py_ms:.1f} ms")
+        if self.python_model_available:
+            try:
+                py_pred, py_ms = run_python_prediction(gray)
+            except Exception as e:
+                py_pred = None
+                self.py_result_lbl.setText("실패")
+                self.py_time_lbl.setText(str(e).splitlines()[-1][:120])
+            if py_pred is not None:
+                py_name = CLASS_NAMES[py_pred] if 0 <= py_pred < 10 else f"?{py_pred}"
+                self.py_result_lbl.setText(f"➜ {py_name}(#{py_pred})")
+                self.py_time_lbl.setText(f"순수 추론: {py_ms:.3f} ms")
         else:
             self.py_result_lbl.setText("모델 없음")
             self.py_time_lbl.setText("")
 
-        port = self.port_box.currentText()
-        if port.startswith("("):
+        port = self.port_box.currentData()
+        if not port:
             self.status.setText("COM 포트를 선택하세요.")
             return
 
@@ -409,7 +547,7 @@ class MainWindow(QWidget):
         self.worker.start()
 
     # ---- 결과 수신 ----
-    def on_result(self, pred, logits, fpga_ms):
+    def on_result(self, pred, logits, _fpga_ms, fpga_cycles):
         # Q14 logit -> 실수 -> softmax
         real = logits.astype(np.float64) / 16384.0
         prob = softmax(real)
@@ -417,13 +555,22 @@ class MainWindow(QWidget):
 
         name = CLASS_NAMES[pred] if 0 <= pred < 10 else f"?{pred}"
         self.result_lbl.setText(f"➜ {name}(#{pred})")
-        self.fpga_time_lbl.setText(f"추론 시간: {fpga_ms:.1f} ms")
+
+        if fpga_cycles is None:
+            self.fpga_time_lbl.setText("순수 연산 시간 측정 불가")
+        else:
+            pure_ms = fpga_cycles / FPGA_CLK_HZ * 1000.0
+            self.fpga_time_lbl.setText(
+                f"순수 연산: {pure_ms:.3f} ms "
+                f"({fpga_cycles} cycles)"
+            )
 
         for k, (lbl, bar) in enumerate(self.bars):
             idx = int(order[k])
             lbl.setText(CLASS_NAMES[idx])
             bar.setValue(int(round(prob[idx] * 100)))
-            bar.setFormat(f"{prob[idx]*100:.1f}%")
+            bar.setFormat(f"{prob[idx] * 100:.1f}%")
+
         self.status.setText("")
 
     def on_fail(self, msg):
