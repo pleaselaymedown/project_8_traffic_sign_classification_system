@@ -18,19 +18,15 @@ Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교
 
 ## 🛠 3. Tech Stack (기술 스택)
 
-### 3.1 Language (사용 언어)
+3.1 Language (사용 언어)
 
-![Verilog](https://img.shields.io/badge/Verilog-FF6600?style=for-the-badge&logo=v&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Tcl](https://img.shields.io/badge/Tcl-FFC0CB?style=for-the-badge&logo=tcl&logoColor=black)
+<p> <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white"> <img src="https://img.shields.io/badge/Verilog-HDL-00599C?style=for-the-badge"> </p>
 
-### 3.2 Development Environment (개발 환경)
+<br>
 
-| Tool | Description |
-| --- | --- |
-| **AMD Vivado** | RTL 설계, 합성/구현, XSim 시뮬레이션, bitstream 생성 |
-| **PyCharm / TensorFlow(Keras)** | GTSRB CNN 학습, 정수 양자화, weight/bias export |
-| **PyQt5** | PC ↔ FPGA UART 실시간 데모 GUI |
+3.2 Development Environment (개발 환경)
+
+<p> <img src="https://img.shields.io/badge/Vivado-F28C28?style=for-the-badge"> <img src="https://img.shields.io/badge/PyCharm-21D789?style=for-the-badge&logo=pycharm&logoColor=black"> <img src="https://img.shields.io/badge/TensorFlow-FF6F00?style=for-the-badge&logo=tensorflow&logoColor=white"> </p>
 
 ### 3.3 Collaboration Tools (협업 도구)
 
