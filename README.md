@@ -11,37 +11,10 @@ Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교
 
 ## ✨ 2. Key Features (주요 기능)
 
-### 🧠 On-Device CNN Inference (온디바이스 CNN 추론)
-
-- `28×28×1 → Conv5 → Pool → Conv6 → Pool → Dense16 → Dense10` 구조를 RTL로 구현
-- FSM 기반 순차 MAC 연산으로 BRAM/ROM 자원을 활용해 합성 (거대한 LUT MUX 방지)
-- 부동소수점 없이 정수 연산만으로 전체 추론 수행
-- 순수 추론 사이클 수를 하드웨어 카운터로 측정 (약 104,600 cycle ≈ 1.05ms @ 100MHz)
-
-### 🔢 Fixed-Point Quantization (고정소수점 양자화)
-
-- 입력·가중치 **Q7** (×128 스케일, signed 8-bit), 바이어스·누산기 **Q14**
-- 은닉층 활성값은 다시 Q7로 requantize + ReLU + clamp
-- Keras 가중치를 8개의 `.mem` 파일로 export → `$readmemh`로 로딩
-- Python golden model과 RTL 결과가 bit-exact하게 일치
-
-### 🔌 UART Communication (UART 통신)
-
-- 115,200 baud / 8N1 (100MHz 기준 `CLKS_PER_BIT = 868`)
-- PC → FPGA : 784바이트 (Q7 양자화된 28×28 픽셀)
-- FPGA → PC : 46바이트 결과 패킷 (헤더 + 클래스 + 로짓 10개 + 사이클 수)
-
-### 🖥️ PyQt5 GUI (PC 데모 프로그램)
-
-- GTSRB 테스트 이미지 폴더 열기 → 썸네일 그리드 표시 (`GT-*.csv`가 있으면 ROI 자동 적용)
-- 썸네일 클릭 → 학습과 동일 전처리 → UART 전송 → 결과 수신
-- 예측 클래스명 + softmax confidence 막대 표시
-- FPGA(정수)와 Keras(부동소수점) 추론 결과·시간 비교 지원
-
-### 🔢 Seven-Segment Display (FND 출력)
-
+- CNN-based Traffic Sign Classification (CNN 기반 표지판 분류)
+- PyQt5 GUI 기반 PC 데모 프로그램 구성
 - 예측된 클래스 인덱스(0~9)를 Basys3 7-세그먼트에 실시간 표시
-- `btnC`로 리셋, 별도 모니터 없이 보드만으로 결과 확인 가능
+
 
 ## 🛠 3. Tech Stack (기술 스택)
 
@@ -108,51 +81,13 @@ project_8_traffic_sign_classification_system/
             └── basys3_npu.xdc       # 핀 제약 (clk W5, RsRx B18, RsTx A18)
 ```
 
-### 4.2 System Block Diagram (시스템 블록다이어그램)
+### 4.2 System flow chart(시스템 플로우 차트)
 
-```
-        PC (PyQt5 GUI)                          Basys3 FPGA
- ┌───────────────────────┐            ┌───────────────────────────────┐
- │ Image select & preproc│            │  npu_top.v                    │
- │ 28x28 grayscale + Q7   │  784 B     │  ┌─────────┐   ┌──────────┐  │
- │        ─────────────── │──UART Tx──▶│  │ uart_rx │──▶│img loader│  │
- │                        │            │  └─────────┘   └────┬─────┘  │
- │                        │            │                     ▼        │
- │                        │            │             ┌──────────────┐│
- │                        │            │             │  npu_core.v  ││
- │                        │            │             │ Conv/Pool/   ││
- │                        │            │             │ Dense (FSM)  ││
- │ Predicted class +      │  46 B      │  ┌─────────┐└──────┬───────┘│
- │ logits + cycles + conf │◀──UART Rx──│  │ uart_tx │◀──────┘        │
- │        ─────────────── │            │  └─────────┘   ┌──────────┐ │
- └───────────────────────┘            │   pred_class──▶│seven_seg │ │
-                                       │                └──────────┘ │
-                                       └───────────────────────────────┘
-```
+<img src="./images/gpt_H_reum_do.png" width="1000">
 
 ### 4.3 CNN Architecture (모델 구조)
 
-```
- Input 28x28x1 (grayscale, Q7)
-   │  Conv 3x3, 5 filters, same pad, ReLU
-   ▼
- 28x28x5
-   │  MaxPool 2x2
-   ▼
- 14x14x5
-   │  Conv 3x3, 6 filters, same pad, ReLU
-   ▼
- 14x14x6
-   │  MaxPool 2x2
-   ▼
- 7x7x6  ──Flatten(HWC: (y*7+x)*6+c)──▶ 294
-   │  Dense 294 -> 16, ReLU
-   ▼
- 16
-   │  Dense 16 -> 10
-   ▼
- 10 logits ──argmax──▶ class 0~9
-```
+<img src="./images/gujo.png" width="1000">
 
 ### 4.4 Data Flow (동작 순서)
 
