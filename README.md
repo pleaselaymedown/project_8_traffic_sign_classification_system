@@ -3,11 +3,13 @@
 
 # 🚦 Project 8 Traffic Sign Classification System
 
+<br>
 
 ## 📌 1. Project Summary (프로젝트 요약)
 
 Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교통 표지판 10종을 분류하는 시스템
 
+<br>
 
 ## ✨ 2. Key Features (주요 기능)
 
@@ -15,6 +17,7 @@ Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교
 - PyQt5 GUI 기반 PC 데모 프로그램 구성
 - 예측된 클래스 인덱스(0~9)를 Basys3 7-세그먼트에 실시간 표시
 
+<br>
 
 ## 🛠 3. Tech Stack (기술 스택)
 
@@ -42,6 +45,8 @@ Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교
 | USB-UART | PC ↔ FPGA 이미지/결과 송수신 (115,200 baud) |
 | 7-Segment | 예측 클래스 인덱스 출력 |
 | PC (PyQt5) | 이미지 선택, 전처리, 결과 시각화 |
+
+<br>
 
 ## 📂 4. Project Structure (프로젝트 구조)
 
