@@ -3,25 +3,13 @@
 
 # 🚦 Project 8 Traffic Sign Classification System
 
-![Verilog](https://img.shields.io/badge/Verilog-FF6600?style=for-the-badge&logo=v&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-FF6F00?style=for-the-badge&logo=tensorflow&logoColor=white)
 
-## 1. Project Summary (프로젝트 요약)
+## 📌 1. Project Summary (프로젝트 요약)
 
-Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 **정수 연산 기반 온디바이스 NPU**로, GTSRB 교통 표지판 10종을 분류하는 시스템입니다.
+Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교통 표지판 10종을 분류하는 시스템
 
-PC의 PyQt5 GUI에서 교통 표지판 이미지를 선택하면 학습과 동일하게 28×28 흑백으로 전처리한 뒤 Q7 정수로 양자화하여 UART로 FPGA에 전송합니다. FPGA 내부의 NPU 코어가 `Conv → Pool → Conv → Pool → Dense → Dense` 전 과정을 고정소수점 연산으로 수행하고, 예측 클래스·10개 로짓·순수 추론 사이클 수를 패킷으로 되돌려 줍니다. PC나 GPU 없이 Basys3 보드 단독으로 추론이 완결됩니다.
 
-```
-Image File -> 28x28 Grayscale -> Q7 Quantize -> UART (784 bytes)
-           -> FPGA NPU Core (Conv/Pool/Dense, fixed-point)
-           -> UART (46-byte result packet) -> PyQt5 GUI
-```
-
-> 본 프로젝트는 실시간 카메라 입력이 아닌, GTSRB 테스트 이미지를 GUI에서 선택하는 방식으로 동작합니다. Keras 학습 모델을 Q7 고정소수점으로 양자화하여 RTL NPU와 소프트웨어(Keras) 추론 결과가 **bit-exact**하게 일치함을 XSim 시뮬레이션과 실보드에서 확인했습니다.
-
-## 2. Key Features (주요 기능)
+## ✨ 2. Key Features (주요 기능)
 
 ### 🧠 On-Device CNN Inference (온디바이스 CNN 추론)
 
