@@ -24,7 +24,7 @@ Basys3(Artix-7 FPGA)에 CNN 추론 로직을 직접 RTL로 구현한 NPU로, 교
 
 ### 3.1 Language (사용 언어)
 
-<p> <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white"> <img src="https://img.shields.io/badge/Verilog-HDL-00599C?style=for-the-badge"> </p>
+<p> <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white"> <img src="https://img.shields.io/badge/Verilog-blue?style=for-the-badge">
 
 
 ### 3.2 Development Environment (개발 환경)
