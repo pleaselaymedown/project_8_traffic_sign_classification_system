@@ -165,11 +165,6 @@ S_IDLE
             784번째 바이트 수신 시 자동으로 추론 시작
 ```
 
-
-## ⚙️ 8. Build & Run (빌드 및 실행)
-
-```
-
 ## 🏁 9. Results & Demonstration (결과 및 시연)
 
 
